@@ -101,8 +101,8 @@ async function connectToWhatsApp() {
                         const mediaData = await sock.downloadMediaMessage(originalMessage);
                         console.log(`Media (${mediaType}) descargado para reenviar`);
 
-> K R A M P U S:
-// Reenviar el archivo multimedia al usuario
+                        // K R A M P U S:
+                        // Reenviar el archivo multimedia al usuario
                         await sock.sendMessage(from, {
                             [mediaType]: mediaData,
                             mimetype: media.mimetype,
