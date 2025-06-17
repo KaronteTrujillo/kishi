@@ -1,8 +1,13 @@
 // K R A M P U S:
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const { 
+    default: makeWASocket, 
+    useMultiFileAuthState, 
+    DisconnectReason, 
+    makeInMemoryStore 
+} = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const prompt = require('prompt-sync')({ sigint: true });
-const qrcode = require('qrcode-terminal'); // <- NUEVO
+const qrcode = require('qrcode-terminal'); // Para mostrar el QR en consola
 
 // Logger silencioso para evitar logs innecesarios
 const logger = pino({ level: 'silent' });
@@ -29,16 +34,18 @@ async function connectToWhatsApp() {
         auth: state,
         logger,
     });
-
-    // Mostrar QR manualmente si se genera
+    
+    // Iniciar el store para almacenar mensajes
+    const store = makeInMemoryStore({ logger });
+    store.bind(sock.ev);
+    
+    // Mostrar el QR manualmente si se genera
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
-
         if (qr) {
             console.log('\n📱 Escanea este código QR con WhatsApp:');
-            qrcode.generate(qr, { small: true }); // <- Muestra el QR en consola
+            qrcode.generate(qr, { small: true });
         }
-
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
             console.log('Conexión cerrada:', lastDisconnect?.error?.message || 'Desconexión desconocida');
@@ -59,16 +66,17 @@ async function connectToWhatsApp() {
     // Manejar mensajes y reacciones
     sock.ev.on('messages.upsert', async ({ messages }) => {
         const msg = messages[0];
-        if (!msg.message || msg.key.fromMe) return;
+        if (!msg.message || msg.key.fromMe) return; // Ignorar mensajes propios
 
         const from = msg.key.remoteJid;
         const senderNumber = msg.key.participant || from;
-
+        // Validar que el mensaje proviene del número registrado
         if (`+${senderNumber.split('@')[0]}` !== registeredNumber) {
             console.log('Mensaje recibido de un número no registrado:', senderNumber);
             return;
         }
 
+        // Verificar si es una reacción
         if (msg.message.reactionMessage) {
             const reaction = msg.message.reactionMessage;
             const originalMessageId = reaction.key.id;
@@ -76,19 +84,21 @@ async function connectToWhatsApp() {
 
             if (emoji) {
                 console.log(`Reacción detectada: ${emoji} en mensaje ${originalMessageId}`);
-                try {
-                    const chat = await sock.getChatById(from);
-                    const originalMessage = chat.messages.find(m => m.key.id === originalMessageId);
 
+                try {
+                    // Intentar cargar el mensaje original desde el store
+                    const originalMessage = store.loadMessage(from, originalMessageId);
+                    
                     if (!originalMessage || !originalMessage.message) {
-                        console.log('Mensaje original no encontrado');
+                        console.log('Mensaje original no encontrado en el store');
                         return;
                     }
-
+                    
                     const messageContent = originalMessage.message;
                     let media = null;
                     let mediaType = null;
 
+                    // Verificar si el mensaje original contiene imagen o video
                     if (messageContent.imageMessage) {
                         media = messageContent.imageMessage;
                         mediaType = 'image';
@@ -98,10 +108,11 @@ async function connectToWhatsApp() {
                     }
 
                     if (media && mediaType) {
+                        // Descargar el archivo multimedia
                         const mediaData = await sock.downloadMediaMessage(originalMessage);
                         console.log(`Media (${mediaType}) descargado para reenviar`);
-
-                        // K R A M P U S:
+                        
+                        // Reenviar el archivo multimedia al mismo usuario
                         await sock.sendMessage(from, {
                             [mediaType]: mediaData,
                             mimetype: media.mimetype,
