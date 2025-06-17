@@ -1,4 +1,4 @@
-> K R A M P U S:
+// K R A M P U S:
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const prompt = require('prompt-sync')({ sigint: true });
