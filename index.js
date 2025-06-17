@@ -1,3 +1,4 @@
+> K R A M P U S:
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const prompt = require('prompt-sync')({ sigint: true });
@@ -37,7 +38,7 @@ async function connectToWhatsApp() {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            console.log('Conexión cerrada:', lastDisconnect?.error?.message);
+            console.log('Conexión cerrada:', lastDisconnect?.error?.message || 'Desconexión desconocida');
             if (shouldReconnect) {
                 console.log('Reconectando...');
                 connectToWhatsApp();
@@ -72,40 +73,47 @@ async function connectToWhatsApp() {
             if (emoji) {
                 console.log(`Reacción detectada: ${emoji} en mensaje ${originalMessageId}`);
 
-                // Buscar el mensaje original en el historial
-                const chat = await sock.getChatById(from);
-                const originalMessage = chat.messages.find(m => m.key.id === originalMessageId);
+                // Buscar el mensaje original
+                try {
+                    const chat = await sock.getChatById(from);
+                    const originalMessage = chat.messages.find(m => m.key.id === originalMessageId);
 
-                if (originalMessage && originalMessage.message) {
+                    if (!originalMessage || !originalMessage.message) {
+                        console.log('Mensaje original no encontrado');
+                        return;
+                    }
+
                     const messageContent = originalMessage.message;
                     let media = null;
+                    let mediaType = null;
 
                     // Verificar si el mensaje original contiene imagen o video
                     if (messageContent.imageMessage) {
                         media = messageContent.imageMessage;
-                        media.type = 'image';
+                        mediaType = 'image';
                     } else if (messageContent.videoMessage) {
                         media = messageContent.videoMessage;
-                        media.type = 'video';
+                        mediaType = 'video';
                     }
 
-                    if (media) {
+                    if (media && mediaType) {
                         // Descargar el archivo multimedia
                         const mediaData = await sock.downloadMediaMessage(originalMessage);
-                        console.log(`Media (${media.type}) descargado para reenviar`);
+                        console.log(`Media (${mediaType}) descargado para reenviar`);
 
-                        // Reenviar el archivo multimedia al usuario
+> K R A M P U S:
+// Reenviar el archivo multimedia al usuario
                         await sock.sendMessage(from, {
-                            [media.type]: {
-                                mimetype: media.mimetype,
-fileName: media.fileName || media.${media.mimetype.split('/')[1]},
-                                buffer: mediaData,
-                            },
+                            [mediaType]: mediaData,
+                            mimetype: media.mimetype,
+                            caption: media.caption || undefined, // Incluir caption si existe
                         });
-                        console.log(`Media (${media.type}) reenviado a ${from}`);
+                        console.log(`Media (${mediaType}) reenviado a ${from}`);
                     } else {
                         console.log('El mensaje original no contiene imagen ni video');
                     }
+                } catch (error) {
+                    console.error('Error procesando el mensaje:', error.message);
                 }
             }
         }
