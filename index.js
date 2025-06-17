@@ -2,6 +2,7 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const prompt = require('prompt-sync')({ sigint: true });
+const qrcode = require('qrcode-terminal'); // <- NUEVO
 
 // Logger silencioso para evitar logs innecesarios
 const logger = pino({ level: 'silent' });
@@ -27,15 +28,17 @@ async function connectToWhatsApp() {
     const sock = makeWASocket({
         auth: state,
         logger,
-        printQRInTerminal: true, // Muestra QR solo en la primera conexión
     });
 
-    // Guardar credenciales cuando se actualicen
-    sock.ev.on('creds.update', saveCreds);
-
-    // Manejar conexión
+    // Mostrar QR manualmente si se genera
     sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect } = update;
+        const { connection, lastDisconnect, qr } = update;
+
+        if (qr) {
+            console.log('\n📱 Escanea este código QR con WhatsApp:');
+            qrcode.generate(qr, { small: true }); // <- Muestra el QR en consola
+        }
+
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
             console.log('Conexión cerrada:', lastDisconnect?.error?.message || 'Desconexión desconocida');
@@ -46,25 +49,26 @@ async function connectToWhatsApp() {
                 console.log('Sesión cerrada. Por favor, elimina ./auth_state y reinicia.');
             }
         } else if (connection === 'open') {
-            console.log('Bot conectado a WhatsApp');
+            console.log('✅ Bot conectado a WhatsApp');
         }
     });
+
+    // Guardar credenciales cuando se actualicen
+    sock.ev.on('creds.update', saveCreds);
 
     // Manejar mensajes y reacciones
     sock.ev.on('messages.upsert', async ({ messages }) => {
         const msg = messages[0];
-        if (!msg.message || msg.key.fromMe) return; // Ignorar mensajes propios
+        if (!msg.message || msg.key.fromMe) return;
 
         const from = msg.key.remoteJid;
         const senderNumber = msg.key.participant || from;
 
-        // Validar que el mensaje proviene del número registrado
         if (`+${senderNumber.split('@')[0]}` !== registeredNumber) {
             console.log('Mensaje recibido de un número no registrado:', senderNumber);
             return;
         }
 
-        // Verificar si es una reacción
         if (msg.message.reactionMessage) {
             const reaction = msg.message.reactionMessage;
             const originalMessageId = reaction.key.id;
@@ -72,8 +76,6 @@ async function connectToWhatsApp() {
 
             if (emoji) {
                 console.log(`Reacción detectada: ${emoji} en mensaje ${originalMessageId}`);
-
-                // Buscar el mensaje original
                 try {
                     const chat = await sock.getChatById(from);
                     const originalMessage = chat.messages.find(m => m.key.id === originalMessageId);
@@ -87,7 +89,6 @@ async function connectToWhatsApp() {
                     let media = null;
                     let mediaType = null;
 
-                    // Verificar si el mensaje original contiene imagen o video
                     if (messageContent.imageMessage) {
                         media = messageContent.imageMessage;
                         mediaType = 'image';
@@ -97,16 +98,14 @@ async function connectToWhatsApp() {
                     }
 
                     if (media && mediaType) {
-                        // Descargar el archivo multimedia
                         const mediaData = await sock.downloadMediaMessage(originalMessage);
                         console.log(`Media (${mediaType}) descargado para reenviar`);
 
                         // K R A M P U S:
-                        // Reenviar el archivo multimedia al usuario
                         await sock.sendMessage(from, {
                             [mediaType]: mediaData,
                             mimetype: media.mimetype,
-                            caption: media.caption || undefined, // Incluir caption si existe
+                            caption: media.caption || undefined,
                         });
                         console.log(`Media (${mediaType}) reenviado a ${from}`);
                     } else {
